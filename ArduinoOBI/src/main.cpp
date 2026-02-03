@@ -76,7 +76,8 @@ void updateDisplayData(byte cmd, byte *data, int len) {
 	
 	// Display battery data if available
 	if (len > 0 && cmd == 0x33) {
-		tft.fillRect(0, 135, 240, 0, TFT_BLACK);
+		// Clear the data display area (from y=135 to bottom of screen)
+		tft.fillRect(0, 135, 240, 105, TFT_BLACK);
 		
 		// Show some battery info (example)
 		tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -89,14 +90,13 @@ void updateDisplayData(byte cmd, byte *data, int len) {
 		
 		// Wrap text if needed
 		int yPos = 135;
-		int maxWidth = 220;
 		int startIdx = 0;
 		while (startIdx < dataStr.length()) {
 			String line = dataStr.substring(startIdx, min((int)dataStr.length(), startIdx + 30));
 			tft.drawString(line, 10, yPos, 1);
 			yPos += 10;
 			startIdx += 30;
-			if (yPos > 130) break; // Prevent overflow
+			if (yPos > 230) break; // Prevent overflow (screen height is 240)
 		}
 	}
 	
