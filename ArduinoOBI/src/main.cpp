@@ -1,18 +1,108 @@
 #include <Arduino.h>
 #include "OneWire2.h"
 
+#ifdef NERDMINER2
+#include <TFT_eSPI.h>
+#endif
+
 /** Major version number (X.x.x) */
 #define ARDUINO_OBI_VERSION_MAJOR 0
 /** Minor version number (x.X.x) */
-#define ARDUINO_OBI_VERSION_MINOR 2
+#define ARDUINO_OBI_VERSION_MINOR 3
 /** Patch version number (x.x.X) */
-#define ARDUINO_OBI_VERSION_PATCH 1
+#define ARDUINO_OBI_VERSION_PATCH 0
 
+// Pin configuration - different for nerdminer2 (ESP32) vs Arduino
+#ifdef NERDMINER2
+#define ONEWIRE_PIN 21
+#define ENABLE_PIN 22
+#else
 #define ONEWIRE_PIN 6
 #define ENABLE_PIN 8
+#endif
 
-
+
 OneWire makita(ONEWIRE_PIN);
+
+#ifdef NERDMINER2
+TFT_eSPI tft = TFT_eSPI();
+
+// Display state variables
+String displayStatus = "Waiting...";
+byte lastCommand = 0x00;
+byte batteryData[255];
+int batteryDataLen = 0;
+unsigned long lastUpdate = 0;
+
+void initDisplay() {
+	tft.init();
+	tft.setRotation(1); // Landscape mode
+	tft.fillScreen(TFT_BLACK);
+	tft.setTextColor(TFT_WHITE, TFT_BLACK);
+	tft.setTextSize(1);
+	
+	// Draw header
+	tft.fillRect(0, 0, 240, 30, TFT_BLUE);
+	tft.setTextColor(TFT_WHITE, TFT_BLUE);
+	tft.drawString("Open Battery Info", 10, 8, 2);
+	
+	// Draw version info
+	tft.setTextColor(TFT_GREEN, TFT_BLACK);
+	tft.drawString("v" + String(ARDUINO_OBI_VERSION_MAJOR) + "." + 
+				   String(ARDUINO_OBI_VERSION_MINOR) + "." + 
+				   String(ARDUINO_OBI_VERSION_PATCH), 10, 40, 2);
+	
+	tft.setTextColor(TFT_WHITE, TFT_BLACK);
+	tft.drawString("NerdMiner2 Edition", 10, 60, 2);
+	
+	// Draw initial status
+	tft.drawString("Status:", 10, 90, 2);
+	updateDisplayStatus("Ready");
+}
+
+void updateDisplayStatus(String status) {
+	displayStatus = status;
+	tft.fillRect(80, 90, 160, 20, TFT_BLACK);
+	tft.setTextColor(TFT_CYAN, TFT_BLACK);
+	tft.drawString(status, 80, 90, 2);
+}
+
+void updateDisplayData(byte cmd, byte *data, int len) {
+	// Clear data area
+	tft.fillRect(0, 115, 240, 20, TFT_BLACK);
+	
+	tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+	tft.drawString("Cmd: 0x" + String(cmd, HEX), 10, 115, 2);
+	
+	// Display battery data if available
+	if (len > 0 && cmd == 0x33) {
+		tft.fillRect(0, 135, 240, 0, TFT_BLACK);
+		
+		// Show some battery info (example)
+		tft.setTextColor(TFT_WHITE, TFT_BLACK);
+		String dataStr = "Data: ";
+		for (int i = 0; i < min(len, 8); i++) {
+			if (i > 0) dataStr += " ";
+			if (data[i] < 0x10) dataStr += "0";
+			dataStr += String(data[i], HEX);
+		}
+		
+		// Wrap text if needed
+		int yPos = 135;
+		int maxWidth = 220;
+		int startIdx = 0;
+		while (startIdx < dataStr.length()) {
+			String line = dataStr.substring(startIdx, min((int)dataStr.length(), startIdx + 30));
+			tft.drawString(line, 10, yPos, 1);
+			yPos += 10;
+			startIdx += 30;
+			if (yPos > 130) break; // Prevent overflow
+		}
+	}
+	
+	lastUpdate = millis();
+}
+#endif
 
 void cmd_and_read_33(byte *cmd, uint8_t cmd_len, byte *rsp, uint8_t rsp_len) {
 	int i;
@@ -71,10 +161,23 @@ void cmd_and_read(byte *cmd, uint8_t cmd_len, byte *rsp, uint8_t rsp_len) {
 
 
 void setup() {
-	Serial.begin (9600);
-    // One-wire
+#ifdef NERDMINER2
+	Serial.begin(115200);
+	
+	// Initialize display
+	initDisplay();
+	
+	// OneWire setup
+	pinMode(ENABLE_PIN, OUTPUT);
+	digitalWrite(ENABLE_PIN, LOW);
+	
+	updateDisplayStatus("Initialized");
+#else
+	Serial.begin(9600);
+	// One-wire
 	pinMode(ENABLE_PIN, OUTPUT);
 	//pinMode(2, OUTPUT);
+#endif
 }
 
 void send_usb(byte *rsp, byte rsp_len) {
@@ -106,6 +209,11 @@ void read_usb() {
         else {
             return;
         }
+        
+#ifdef NERDMINER2
+        updateDisplayStatus("Processing...");
+#endif
+        
         /* Set RTS */
     	digitalWrite(ENABLE_PIN, HIGH);
 	    delay(400);
@@ -162,6 +270,12 @@ void read_usb() {
         rsp[0] = cmd;
         rsp[1] = rsp_len;
         send_usb(rsp, rsp_len + 2);
+
+#ifdef NERDMINER2
+        // Update display with received data
+        updateDisplayData(cmd, &rsp[2], rsp_len);
+        updateDisplayStatus("Ready");
+#endif
 
         digitalWrite(ENABLE_PIN, LOW);
     }
