@@ -2,3 +2,4 @@ __pycache__
 build*
 dist*
 .venv*
+_codeql_detected_source_root
