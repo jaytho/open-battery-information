@@ -22,10 +22,19 @@ I have spent alot of time on this project and now releasing all this information
 
 # Instructions
 
+## Hardware Platforms
+
+This project now supports multiple hardware platforms:
+
+- **Arduino UNO/Nano** - Original platform using ATmega328P
+- **NerdMiner2** - ESP32-S3 based board with color LCD display
+
+For detailed NerdMiner2 setup instructions, see the [NerdMiner2 Setup Guide](docs/NERDMINER2_SETUP.md).
+
 ## Step 1: Set Up ArduinoOBI
 
   1. Navigate to the ArduinoOBI folder in the project directory.
-  2. Follow the instructions in the README.md. This section will guide you through configuring the Arduino part of the system, ensuring everything is set up correctly.
+  2. Follow the instructions in the README.md. This section will guide you through configuring the hardware interface, whether you're using Arduino or NerdMiner2.
 
 ## Step 2: Set Up OpenBatteryInformation
 
