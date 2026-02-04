@@ -93,16 +93,22 @@ void updateDisplayStatus(String status) {
 // Helper function to parse battery data from READ_DATA_REQUEST response
 void parseBatteryData(byte *data, int len) {
 	// Based on READ_DATA_REQUEST format from makita_lxt.py
-	// response[2:4] = pack voltage
-	// response[4:6] = cell 1 voltage
-	// response[6:8] = cell 2 voltage
-	// response[8:10] = cell 3 voltage
-	// response[10:12] = cell 4 voltage
-	// response[12:14] = cell 5 voltage
-	// response[16:18] = temp sensor 1
-	// response[18:20] = temp sensor 2
+	// All values are little-endian 16-bit integers (LSB first, then MSB)
+	// response[2:4] = pack voltage (mV)
+	// response[4:6] = cell 1 voltage (mV)
+	// response[6:8] = cell 2 voltage (mV)
+	// response[8:10] = cell 3 voltage (mV)
+	// response[10:12] = cell 4 voltage (mV)
+	// response[12:14] = cell 5 voltage (mV)
+	// response[16:18] = temp sensor 1 (0.01°C)
+	// response[18:20] = temp sensor 2 (0.01°C)
+	
+	// Voltage validation constants
+	const uint16_t MIN_VALID_PACK_VOLTAGE_MV = 1000;  // 1V minimum
+	const uint16_t MAX_VALID_PACK_VOLTAGE_MV = 30000; // 30V maximum
 	
 	if (len >= 20) {
+		// Parse voltages (little-endian: data[0]=LSB, data[1]=MSB)
 		batteryInfo.packVoltage = ((data[1] << 8) | data[0]) / 1000.0;
 		batteryInfo.cell1Voltage = ((data[3] << 8) | data[2]) / 1000.0;
 		batteryInfo.cell2Voltage = ((data[5] << 8) | data[4]) / 1000.0;
@@ -121,6 +127,7 @@ void parseBatteryData(byte *data, int len) {
 		}
 		batteryInfo.cellVoltageDiff = maxV - minV;
 		
+		// Parse temperatures (little-endian 16-bit, scale 0.01°C)
 		batteryInfo.tempSensor1 = ((data[15] << 8) | data[14]) / 100.0;
 		batteryInfo.tempSensor2 = ((data[17] << 8) | data[16]) / 100.0;
 		batteryInfo.dataValid = true;
@@ -177,11 +184,15 @@ void updateDisplayData(byte cmd, byte *data, int len) {
 	tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
 	tft.drawString("Cmd: 0x" + String(cmd, HEX), 10, 115, 1);
 	
+	// Voltage validation constants (same as in parseBatteryData)
+	const uint16_t MIN_VALID_PACK_VOLTAGE_MV = 1000;  // 1V minimum
+	const uint16_t MAX_VALID_PACK_VOLTAGE_MV = 30000; // 30V maximum
+	
 	// Parse and display battery data for READ_DATA_REQUEST command
 	if (cmd == 0xCC && len >= 20) {
 		// Check if this looks like battery data (voltages should be reasonable)
-		uint16_t packV = ((data[1] << 8) | data[0]);
-		if (packV > 1000 && packV < 30000) {  // Between 1V and 30V
+		uint16_t packV = ((data[1] << 8) | data[0]);  // Little-endian
+		if (packV > MIN_VALID_PACK_VOLTAGE_MV && packV < MAX_VALID_PACK_VOLTAGE_MV) {
 			parseBatteryData(data, len);
 			displayBatteryInfo();
 			return;

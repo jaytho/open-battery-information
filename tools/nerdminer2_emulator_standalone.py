@@ -169,18 +169,18 @@ def generate_preview_states():
     display.init_display()
     # Simulate READ_DATA_REQUEST response with realistic battery data
     # Pack voltage: 18.5V (18500 mV = 0x484C little-endian)
-    # Cell voltages: 3.7V each (3700 mV = 0x0E74 little-endian)
-    # Temperatures: 25.5°C (2550 = 0x09F6 little-endian)
+    # Cell voltages in mV (little-endian 16-bit: LSB, MSB)
+    # Temperatures in 0.01°C units (little-endian)
     battery_data = [
-        0x4C, 0x48,  # Pack voltage: 18.5V
-        0x74, 0x0E,  # Cell 1: 3.7V
-        0x70, 0x0E,  # Cell 2: 3.68V
-        0x78, 0x0E,  # Cell 3: 3.704V
-        0x6C, 0x0E,  # Cell 4: 3.692V
-        0x74, 0x0E,  # Cell 5: 3.7V
+        0x4C, 0x48,  # Pack voltage: 18.50V (18500 mV = 0x484C)
+        0x74, 0x0E,  # Cell 1: 3.700V (3700 mV = 0x0E74)
+        0x70, 0x0E,  # Cell 2: 3.696V (3696 mV = 0x0E70)
+        0x78, 0x0E,  # Cell 3: 3.704V (3704 mV = 0x0E78)
+        0x6C, 0x0E,  # Cell 4: 3.692V (3692 mV = 0x0E6C)
+        0x74, 0x0E,  # Cell 5: 3.700V (3700 mV = 0x0E74)
         0x00, 0x00,  # Reserved
-        0xF6, 0x09,  # Temp 1: 25.5°C
-        0xEA, 0x09,  # Temp 2: 25.38°C
+        0xF6, 0x09,  # Temp 1: 25.50°C (2550 = 0x09F6)
+        0xEA, 0x09,  # Temp 2: 25.38°C (2538 = 0x09EA)
     ]
     display.update_display_data(0xCC, battery_data)
     display.save("nerdminer2_display_batterydata.png", scale=4)
