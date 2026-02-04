@@ -1,18 +1,226 @@
 #include <Arduino.h>
 #include "OneWire2.h"
 
+#ifdef NERDMINER2
+#include <TFT_eSPI.h>
+#endif
+
 /** Major version number (X.x.x) */
 #define ARDUINO_OBI_VERSION_MAJOR 0
 /** Minor version number (x.X.x) */
-#define ARDUINO_OBI_VERSION_MINOR 2
+#define ARDUINO_OBI_VERSION_MINOR 3
 /** Patch version number (x.x.X) */
-#define ARDUINO_OBI_VERSION_PATCH 1
+#define ARDUINO_OBI_VERSION_PATCH 0
 
+// Pin configuration - different for nerdminer2 (ESP32) vs Arduino
+#ifdef NERDMINER2
+#define ONEWIRE_PIN 21
+#define ENABLE_PIN 22
+#else
 #define ONEWIRE_PIN 6
 #define ENABLE_PIN 8
+#endif
 
-
+
 OneWire makita(ONEWIRE_PIN);
+
+#ifdef NERDMINER2
+TFT_eSPI tft = TFT_eSPI();
+
+// Display state variables
+String displayStatus = "Waiting...";
+byte lastCommand = 0x00;
+byte batteryData[255];
+int batteryDataLen = 0;
+unsigned long lastUpdate = 0;
+
+// Battery data structure
+struct BatteryInfo {
+    float packVoltage;
+    float cell1Voltage;
+    float cell2Voltage;
+    float cell3Voltage;
+    float cell4Voltage;
+    float cell5Voltage;
+    float cellVoltageDiff;
+    float tempSensor1;
+    float tempSensor2;
+    uint16_t chargeCount;
+    String state;
+    uint8_t statusCode;
+    bool dataValid;
+} batteryInfo = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Unknown", 0, false};
+
+void initDisplay() {
+	tft.init();
+	tft.setRotation(1); // Landscape mode
+	tft.fillScreen(TFT_BLACK);
+	tft.setTextColor(TFT_WHITE, TFT_BLACK);
+	tft.setTextSize(1);
+	
+	// Draw header
+	tft.fillRect(0, 0, 240, 25, TFT_BLUE);
+	tft.setTextColor(TFT_WHITE, TFT_BLUE);
+	tft.drawString("Open Battery Info", 10, 6, 2);
+	
+	// Draw version info
+	tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+	tft.drawString("v" + String(ARDUINO_OBI_VERSION_MAJOR) + "." + 
+				   String(ARDUINO_OBI_VERSION_MINOR) + "." + 
+				   String(ARDUINO_OBI_VERSION_PATCH) + " | NerdMiner2", 10, 28, 1);
+	
+	// Draw status label
+	tft.setTextColor(TFT_WHITE, TFT_BLACK);
+	tft.drawString("Status:", 10, 42, 2);
+	updateDisplayStatus("Ready");
+}
+
+void updateDisplayStatus(String status) {
+	displayStatus = status;
+	// Clear status area
+	tft.fillRect(70, 42, 170, 16, TFT_BLACK);
+	
+	// Draw new status with color coding
+	uint16_t color = TFT_CYAN;
+	if (status == "Processing...") color = TFT_YELLOW;
+	else if (status == "Error") color = TFT_RED;
+	else if (status.indexOf("Reading") >= 0) color = TFT_ORANGE;
+	
+	tft.setTextColor(color, TFT_BLACK);
+	tft.drawString(status, 70, 42, 2);
+}
+
+// Helper function to parse battery data from READ_DATA_REQUEST response
+void parseBatteryData(byte *data, int len) {
+	// Based on READ_DATA_REQUEST format from makita_lxt.py
+	// All values are little-endian 16-bit integers (LSB first, then MSB)
+	// response[2:4] = pack voltage (mV)
+	// response[4:6] = cell 1 voltage (mV)
+	// response[6:8] = cell 2 voltage (mV)
+	// response[8:10] = cell 3 voltage (mV)
+	// response[10:12] = cell 4 voltage (mV)
+	// response[12:14] = cell 5 voltage (mV)
+	// response[16:18] = temp sensor 1 (0.01°C)
+	// response[18:20] = temp sensor 2 (0.01°C)
+	
+	// Voltage validation constants
+	const uint16_t MIN_VALID_PACK_VOLTAGE_MV = 1000;  // 1V minimum
+	const uint16_t MAX_VALID_PACK_VOLTAGE_MV = 30000; // 30V maximum
+	
+	if (len >= 20) {
+		// Parse voltages (little-endian: data[0]=LSB, data[1]=MSB)
+		batteryInfo.packVoltage = ((data[1] << 8) | data[0]) / 1000.0;
+		batteryInfo.cell1Voltage = ((data[3] << 8) | data[2]) / 1000.0;
+		batteryInfo.cell2Voltage = ((data[5] << 8) | data[4]) / 1000.0;
+		batteryInfo.cell3Voltage = ((data[7] << 8) | data[6]) / 1000.0;
+		batteryInfo.cell4Voltage = ((data[9] << 8) | data[8]) / 1000.0;
+		batteryInfo.cell5Voltage = ((data[11] << 8) | data[10]) / 1000.0;
+		
+		// Calculate voltage difference
+		float voltages[] = {batteryInfo.cell1Voltage, batteryInfo.cell2Voltage, 
+		                    batteryInfo.cell3Voltage, batteryInfo.cell4Voltage, 
+		                    batteryInfo.cell5Voltage};
+		float maxV = voltages[0], minV = voltages[0];
+		for (int i = 1; i < 5; i++) {
+			if (voltages[i] > maxV) maxV = voltages[i];
+			if (voltages[i] < minV) minV = voltages[i];
+		}
+		batteryInfo.cellVoltageDiff = maxV - minV;
+		
+		// Parse temperatures (little-endian 16-bit, scale 0.01°C)
+		batteryInfo.tempSensor1 = ((data[15] << 8) | data[14]) / 100.0;
+		batteryInfo.tempSensor2 = ((data[17] << 8) | data[16]) / 100.0;
+		batteryInfo.dataValid = true;
+	}
+}
+
+// Enhanced display function to show parsed battery data
+void displayBatteryInfo() {
+	if (!batteryInfo.dataValid) {
+		return;
+	}
+	
+	int yPos = 62;
+	tft.fillRect(0, yPos, 240, 73, TFT_BLACK); // Clear data area
+	
+	// Display pack voltage (large)
+	tft.setTextColor(TFT_GREEN, TFT_BLACK);
+	tft.drawString("Pack: " + String(batteryInfo.packVoltage, 2) + "V", 10, yPos, 2);
+	yPos += 18;
+	
+	// Display cell voltages (compact)
+	tft.setTextColor(TFT_CYAN, TFT_BLACK);
+	String cells = "C1:" + String(batteryInfo.cell1Voltage, 2) + " " +
+	               "C2:" + String(batteryInfo.cell2Voltage, 2) + " " +
+	               "C3:" + String(batteryInfo.cell3Voltage, 2);
+	tft.drawString(cells, 5, yPos, 1);
+	yPos += 10;
+	
+	cells = "C4:" + String(batteryInfo.cell4Voltage, 2) + " " +
+	        "C5:" + String(batteryInfo.cell5Voltage, 2) + " " +
+	        "Diff:" + String(batteryInfo.cellVoltageDiff, 3);
+	tft.drawString(cells, 5, yPos, 1);
+	yPos += 10;
+	
+	// Display temperatures
+	tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+	String temps = "Temp1: " + String(batteryInfo.tempSensor1, 1) + "C  " +
+	               "Temp2: " + String(batteryInfo.tempSensor2, 1) + "C";
+	tft.drawString(temps, 5, yPos, 1);
+	yPos += 12;
+	
+	// Display status if available
+	if (batteryInfo.statusCode != 0 || batteryInfo.state != "Unknown") {
+		tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+		String status = "State: " + batteryInfo.state + " [0x" + String(batteryInfo.statusCode, HEX) + "]";
+		tft.drawString(status, 5, yPos, 1);
+	}
+}
+
+void updateDisplayData(byte cmd, byte *data, int len) {
+	// Clear command area
+	tft.fillRect(0, 115, 240, 20, TFT_BLACK);
+	
+	tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
+	tft.drawString("Cmd: 0x" + String(cmd, HEX), 10, 115, 1);
+	
+	// Voltage validation constants (same as in parseBatteryData)
+	const uint16_t MIN_VALID_PACK_VOLTAGE_MV = 1000;  // 1V minimum
+	const uint16_t MAX_VALID_PACK_VOLTAGE_MV = 30000; // 30V maximum
+	
+	// Parse and display battery data for READ_DATA_REQUEST command
+	if (cmd == 0xCC && len >= 20) {
+		// Check if this looks like battery data (voltages should be reasonable)
+		uint16_t packV = ((data[1] << 8) | data[0]);  // Little-endian
+		if (packV > MIN_VALID_PACK_VOLTAGE_MV && packV < MAX_VALID_PACK_VOLTAGE_MV) {
+			parseBatteryData(data, len);
+			displayBatteryInfo();
+			return;
+		}
+	}
+	
+	// For other commands or if parsing failed, show raw hex data
+	if (len > 0) {
+		// Clear the data display area
+		tft.fillRect(0, 120, 240, 15, TFT_BLACK);
+		
+		// Show hex data
+		tft.setTextColor(TFT_WHITE, TFT_BLACK);
+		
+		// Build data string
+		String dataStr = "Data: ";
+		for (int i = 0; i < min(len, 8); i++) {
+			if (i > 0) dataStr += " ";
+			if (data[i] < 0x10) dataStr += "0";
+			dataStr += String(data[i], HEX);
+		}
+		
+		tft.drawString(dataStr, 10, 120, 1);
+	}
+	
+	lastUpdate = millis();
+}
+#endif
 
 void cmd_and_read_33(byte *cmd, uint8_t cmd_len, byte *rsp, uint8_t rsp_len) {
 	int i;
@@ -71,10 +279,23 @@ void cmd_and_read(byte *cmd, uint8_t cmd_len, byte *rsp, uint8_t rsp_len) {
 
 
 void setup() {
-	Serial.begin (9600);
-    // One-wire
+#ifdef NERDMINER2
+	Serial.begin(115200);
+	
+	// Initialize display
+	initDisplay();
+	
+	// OneWire setup
+	pinMode(ENABLE_PIN, OUTPUT);
+	digitalWrite(ENABLE_PIN, LOW);
+	
+	updateDisplayStatus("Initialized");
+#else
+	Serial.begin(9600);
+	// One-wire
 	pinMode(ENABLE_PIN, OUTPUT);
 	//pinMode(2, OUTPUT);
+#endif
 }
 
 void send_usb(byte *rsp, byte rsp_len) {
@@ -106,6 +327,11 @@ void read_usb() {
         else {
             return;
         }
+        
+#ifdef NERDMINER2
+        updateDisplayStatus("Processing...");
+#endif
+        
         /* Set RTS */
     	digitalWrite(ENABLE_PIN, HIGH);
 	    delay(400);
@@ -162,6 +388,12 @@ void read_usb() {
         rsp[0] = cmd;
         rsp[1] = rsp_len;
         send_usb(rsp, rsp_len + 2);
+
+#ifdef NERDMINER2
+        // Update display with received data
+        updateDisplayData(cmd, &rsp[2], rsp_len);
+        updateDisplayStatus("Ready");
+#endif
 
         digitalWrite(ENABLE_PIN, LOW);
     }
