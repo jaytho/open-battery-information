@@ -3,3 +3,5 @@ build*
 dist*
 .venv*
 _codeql_detected_source_root
+tools/example_*.png
+tools/nerdminer2_display_preview.png
