@@ -55,6 +55,44 @@ The NerdMiner2 uses different GPIO pins compared to the Arduino UNO:
 | Display RST | N/A | GPIO 17 |
 | Display BL | N/A | GPIO 4 |
 
+### Can I Use Different Pins?
+
+**Yes!** The OneWire and Enable pins are configurable. You can change them in two ways:
+
+**Option 1: Via platformio.ini**
+```ini
+build_flags = 
+    -DNERDMINER2
+    -DONEWIRE_PIN=<your_pin>
+    -DENABLE_PIN=<your_pin>
+```
+
+**Option 2: Edit main.cpp**
+```cpp
+#ifdef NERDMINER2
+#define ONEWIRE_PIN 21  // Change to your preferred pin
+#define ENABLE_PIN 22   // Change to your preferred pin
+#endif
+```
+
+**Safe GPIO pins for OneWire on ESP32-S3:**
+- GPIO 1-18 (except display pins: 4, 5, 16, 17, 18, 23)
+- GPIO 21, 22 (current defaults) ✅ **Recommended**
+- GPIO 38-42 (if not used for other purposes)
+
+**Avoid:** GPIO 0 (boot), GPIO 19-20 (USB), GPIO 26-37 (PSRAM), GPIO 43-44 (UART)
+
+### Using Board's Built-in OneWire Pins
+
+Some NerdMiner2 boards may have dedicated OneWire pins labeled "1W", "OneWire", or "DQ". Check your specific board:
+
+1. Look for pin labels on the PCB silkscreen
+2. Consult your board's schematic
+3. These often connect to GPIO 21 or similar pins
+4. May include level shifter for 5V compatibility
+
+If your board has these pins, you can use them directly - they're likely already connected to GPIO 21.
+
 ## Wiring Instructions
 
 ### OneWire Battery Interface
@@ -110,20 +148,60 @@ In the PlatformIO sidebar:
 
 ## Display Features
 
-The NerdMiner2 version includes a color LCD display that shows:
+The NerdMiner2 version includes a color LCD display that shows parsed battery information in real-time!
+
+### Display Layout
+
+![Battery Data Display](images/nerdminer2_display_batterydata.png)
 
 ### Header Section (Blue Background)
 - **Application Name**: "Open Battery Info"
+- **Version**: "v0.3.0 | NerdMiner2" (gray text)
 
-### Information Section
-- **Version Number**: Current firmware version (e.g., v0.3.0)
-- **Edition**: "NerdMiner2 Edition"
-
-### Status Section
+### Status Section (Color-Coded)
 - **Status**: Current operation status
-  - "Ready" - Waiting for commands
-  - "Processing..." - Actively communicating with battery
-  - "Initialized" - System just started
+  - "Ready" (Cyan) - Waiting for commands
+  - "Processing..." (Yellow) - Actively communicating with battery
+  - "Initialized" (Cyan) - System just started
+  - "Error" (Red) - Communication error
+
+### Battery Data Section (Auto-Parsed)
+
+When battery data is received, the display automatically parses and shows:
+
+**Pack Voltage** (Large, Green)
+- Total battery pack voltage (e.g., "Pack: 18.50V")
+
+**Cell Voltages** (Compact, Cyan)
+- Individual cell voltages for 5 cells
+- Format: "C1:3.70 C2:3.68 C3:3.70"
+- Second line: "C4:3.69 C5:3.70 Diff:0.020"
+- Voltage difference shows balance status
+
+**Temperature Sensors** (Yellow)
+- Two temperature readings
+- Format: "Temp1: 25.5C  Temp2: 25.4C"
+- Sensor 1: Cell temperature
+- Sensor 2: MOSFET/circuit temperature
+
+**Command Information** (Magenta)
+- Last command executed (e.g., "Cmd: 0xCC")
+- Helps with debugging
+
+### Supported Battery Commands
+
+The display automatically recognizes and parses:
+
+- **0xCC (READ_DATA_REQUEST)**: Shows full battery data with parsed values
+- **0x33**: Shows ROM ID and battery message data  
+- **Other commands**: Shows raw hex data for debugging
+
+### Display Updates
+
+- Updates occur when Python application sends commands
+- No manual refresh needed - automatic parsing
+- Color-coded for quick status recognition
+- Compact layout fits all info on 135×240 display
 
 ### Data Section
 - **Command**: Last command sent to the battery (in hexadecimal)
@@ -138,6 +216,81 @@ The NerdMiner2 maintains full compatibility with the original serial protocol:
 - **Commands**: All original commands work identically
 
 You can use the same Python software (OpenBatteryInformation) to communicate with the NerdMiner2.
+
+## Using the Display - Quick Start
+
+### Step 1: Connect Battery
+1. Connect your Makita battery to the OneWire interface
+2. Ensure proper wiring: GPIO 21 → Data, GPIO 22 → Enable, GND → Ground
+
+### Step 2: Connect to Computer
+1. Connect NerdMiner2 to computer via USB-C
+2. The display will show "Status: Ready" in cyan
+
+### Step 3: Run Python Application
+```bash
+cd OpenBatteryInformation
+python main.py
+```
+
+### Step 4: Select Interface
+1. In the application, select "Arduino OBI" from the interface dropdown
+2. Choose your NerdMiner2's COM port
+3. Click "Connect"
+
+### Step 5: Read Battery Data
+1. Select "Makita LXT" from the module dropdown
+2. Click "Read battery model"
+3. **Watch the display!** It will show:
+   - Status changes to "Processing..." (yellow)
+   - Battery data appears: voltages, temperatures
+   - Status returns to "Ready" (cyan)
+
+### What You'll See on the Display
+
+**During Communication:**
+```
+┌─────────────────────────┐
+│ Open Battery Info       │ (Blue header)
+│ v0.3.0 | NerdMiner2     │ (Gray)
+│ Status: Processing...   │ (Yellow)
+└─────────────────────────┘
+```
+
+**After Reading Battery Data:**
+```
+┌─────────────────────────┐
+│ Open Battery Info       │ (Blue)
+│ v0.3.0 | NerdMiner2     │ (Gray)
+│ Status: Ready           │ (Cyan)
+├─────────────────────────┤
+│ Pack: 18.50V           │ (Green - Large)
+│ C1:3.70 C2:3.68 C3:3.70│ (Cyan)
+│ C4:3.69 C5:3.70 Diff:0.020
+│ Temp1: 25.5C Temp2: 25.4C (Yellow)
+├─────────────────────────┤
+│ Cmd: 0xCC              │ (Magenta)
+└─────────────────────────┘
+```
+
+### Interpreting the Display
+
+**Pack Voltage**: Should match sum of cell voltages (±0.1V)
+
+**Cell Voltages**: 
+- Healthy: 3.0V - 4.2V per cell
+- Balanced: Diff < 0.05V is good, < 0.02V is excellent
+- Unbalanced: Diff > 0.1V may indicate cell degradation
+
+**Temperatures**:
+- Normal: 15°C - 45°C
+- Charging/Use: May reach 50°C
+- Over 60°C: Stop using, battery may be damaged
+
+**Status Colors**:
+- Cyan = Normal operation
+- Yellow = Processing/busy
+- Red = Error condition
 
 ## Troubleshooting
 
