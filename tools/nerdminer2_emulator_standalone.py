@@ -84,16 +84,13 @@ class NerdMiner2Display:
         self.draw.text((10, 115), cmd_text, fill=TFT_YELLOW, font=self.font_small)
         
         # Display battery data if available for command 0x33
-        if len(data) > 0 and cmd == 0x33:
-            # Show battery data
-            data_str = "Data: "
-            for i, byte in enumerate(data[:8]):  # Show up to 8 bytes
-                if i > 0:
-                    data_str += " "
-                data_str += f"{byte:02X}"
+        if data and cmd == 0x33:  # Empty lists are falsy in Python
+            # Show battery data (up to 8 bytes)
+            data_str = 'Data: ' + ' '.join(f'{byte:02X}' for byte in data[:8])
             
-            # Draw data (note: limited vertical space in landscape mode)
-            self.draw.text((10, 125), data_str, fill=TFT_WHITE, font=self.font_small)
+            # Draw data at Y=125 (10 pixels below command, fits within 135px height)
+            DATA_Y_POSITION = 125
+            self.draw.text((10, DATA_Y_POSITION), data_str, fill=TFT_WHITE, font=self.font_small)
     
     def save(self, filename, scale=4):
         """Save the display to a file, optionally scaled up"""

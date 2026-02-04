@@ -15,6 +15,9 @@ TFT_CYAN = (0, 255, 255)
 TFT_YELLOW = (255, 255, 0)
 TFT_WHITE = (255, 255, 255)
 
+# Default sample battery data for testing
+DEFAULT_SAMPLE_DATA = "12 34 AB CD EF"
+
 def get_display_name():
     return "NerdMiner2 Emulator"
 
@@ -95,7 +98,7 @@ class Interface(tk.Frame):
         
         self.data_entry = tk.Entry(controls_frame, width=30)
         self.data_entry.grid(row=2, column=1, sticky='w', padx=5, pady=5)
-        self.data_entry.insert(0, "12 34 AB CD EF")
+        self.data_entry.insert(0, DEFAULT_SAMPLE_DATA)
         
         tk.Button(controls_frame, text="Send Custom Data", 
                  command=self.send_custom_data).grid(row=3, column=1, sticky='w', pady=5)
@@ -164,25 +167,14 @@ class Interface(tk.Frame):
         self.draw.text((10, 115), cmd_text, fill=TFT_YELLOW, font=self.font_medium)
         
         # Display battery data if available for command 0x33
-        if len(data) > 0 and cmd == 0x33:
-            # Clear the data display area (note: in actual display this goes to y=240)
-            # But our display is only 135 high in landscape, so we work within constraints
+        if data and cmd == 0x33:  # Empty lists are falsy in Python
+            # Show battery data (up to 8 bytes)
+            data_str = 'Data: ' + ' '.join(f'{byte:02X}' for byte in data[:8])
             
-            # Show battery data
-            data_str = "Data: "
-            for i, byte in enumerate(data[:8]):  # Show up to 8 bytes
-                if i > 0:
-                    data_str += " "
-                data_str += f"{byte:02X}"
-            
-            # For this small display, we'll show it compactly
-            # Note: The actual device is 240 wide x 135 tall in landscape
-            # In the C++ code it's rotated, so we need to fit text appropriately
-            # Since we can't fit much vertically, show data inline if possible
-            if len(data_str) <= 30:
-                y_pos = 125
-                # Just show on one line if it fits
-                # (canvas is only 135 high, so limited space)
+            # Draw data at Y=125 (10 pixels below command, fits within 135px height)
+            # Note: The actual device is 240 wide × 135 tall in landscape mode
+            DATA_Y_POSITION = 125
+            self.draw.text((10, DATA_Y_POSITION), data_str, fill=TFT_WHITE, font=self.font_small)
             
         self.refresh_canvas()
     
