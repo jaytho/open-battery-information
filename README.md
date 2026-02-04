@@ -31,6 +31,17 @@ This project now supports multiple hardware platforms:
 
 For detailed NerdMiner2 setup instructions, see the [NerdMiner2 Setup Guide](docs/NERDMINER2_SETUP.md).
 
+### Testing Without Hardware
+
+Want to see what the NerdMiner2 display looks like before building the hardware? We provide a **display emulator** that generates preview images and simulates the UI:
+
+```bash
+cd tools
+python3 nerdminer2_emulator_standalone.py --preview
+```
+
+This generates preview images for all display states. See the [tools README](tools/README.md) for more details.
+
 ## Step 1: Set Up ArduinoOBI
 
   1. Navigate to the ArduinoOBI folder in the project directory.

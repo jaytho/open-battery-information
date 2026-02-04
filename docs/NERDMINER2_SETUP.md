@@ -4,6 +4,31 @@
 
 This guide explains how to set up the Open Battery Information system on a NerdMiner2 board, which features an ESP32-S3 microcontroller and a color TFT LCD display.
 
+## Testing Without Hardware - Display Emulator
+
+**Don't have NerdMiner2 hardware yet?** You can preview and test the UI using our display emulator!
+
+The emulator allows you to:
+- Visualize the exact display layout without hardware
+- Test different display states (Ready, Processing, Battery Data)
+- Develop and verify UI changes before flashing to hardware
+- Generate preview images for documentation
+
+See the [Display Emulator Documentation](../tools/README.md) for usage instructions.
+
+**Preview Images:**
+
+### Ready State
+![NerdMiner2 Display - Ready](images/nerdminer2_display_ready.png)
+
+### Processing State
+![NerdMiner2 Display - Processing](images/nerdminer2_display_processing.png)
+
+### Battery Data Display
+![NerdMiner2 Display - Data](images/nerdminer2_display_data.png)
+
+---
+
 ## Hardware Requirements
 
 - **NerdMiner2 Board** with:
