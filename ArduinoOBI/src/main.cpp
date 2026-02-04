@@ -34,6 +34,23 @@ byte batteryData[255];
 int batteryDataLen = 0;
 unsigned long lastUpdate = 0;
 
+// Battery data structure
+struct BatteryInfo {
+    float packVoltage;
+    float cell1Voltage;
+    float cell2Voltage;
+    float cell3Voltage;
+    float cell4Voltage;
+    float cell5Voltage;
+    float cellVoltageDiff;
+    float tempSensor1;
+    float tempSensor2;
+    uint16_t chargeCount;
+    String state;
+    uint8_t statusCode;
+    bool dataValid;
+} batteryInfo = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Unknown", 0, false};
+
 void initDisplay() {
 	tft.init();
 	tft.setRotation(1); // Landscape mode
@@ -42,45 +59,144 @@ void initDisplay() {
 	tft.setTextSize(1);
 	
 	// Draw header
-	tft.fillRect(0, 0, 240, 30, TFT_BLUE);
+	tft.fillRect(0, 0, 240, 25, TFT_BLUE);
 	tft.setTextColor(TFT_WHITE, TFT_BLUE);
-	tft.drawString("Open Battery Info", 10, 8, 2);
+	tft.drawString("Open Battery Info", 10, 6, 2);
 	
 	// Draw version info
-	tft.setTextColor(TFT_GREEN, TFT_BLACK);
+	tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
 	tft.drawString("v" + String(ARDUINO_OBI_VERSION_MAJOR) + "." + 
 				   String(ARDUINO_OBI_VERSION_MINOR) + "." + 
-				   String(ARDUINO_OBI_VERSION_PATCH), 10, 40, 2);
+				   String(ARDUINO_OBI_VERSION_PATCH) + " | NerdMiner2", 10, 28, 1);
 	
+	// Draw status label
 	tft.setTextColor(TFT_WHITE, TFT_BLACK);
-	tft.drawString("NerdMiner2 Edition", 10, 60, 2);
-	
-	// Draw initial status
-	tft.drawString("Status:", 10, 90, 2);
+	tft.drawString("Status:", 10, 42, 2);
 	updateDisplayStatus("Ready");
 }
 
 void updateDisplayStatus(String status) {
 	displayStatus = status;
-	tft.fillRect(80, 90, 160, 20, TFT_BLACK);
+	// Clear status area
+	tft.fillRect(70, 42, 170, 16, TFT_BLACK);
+	
+	// Draw new status with color coding
+	uint16_t color = TFT_CYAN;
+	if (status == "Processing...") color = TFT_YELLOW;
+	else if (status == "Error") color = TFT_RED;
+	else if (status.indexOf("Reading") >= 0) color = TFT_ORANGE;
+	
+	tft.setTextColor(color, TFT_BLACK);
+	tft.drawString(status, 70, 42, 2);
+}
+
+// Helper function to parse battery data from READ_DATA_REQUEST response
+void parseBatteryData(byte *data, int len) {
+	// Based on READ_DATA_REQUEST format from makita_lxt.py
+	// response[2:4] = pack voltage
+	// response[4:6] = cell 1 voltage
+	// response[6:8] = cell 2 voltage
+	// response[8:10] = cell 3 voltage
+	// response[10:12] = cell 4 voltage
+	// response[12:14] = cell 5 voltage
+	// response[16:18] = temp sensor 1
+	// response[18:20] = temp sensor 2
+	
+	if (len >= 20) {
+		batteryInfo.packVoltage = ((data[1] << 8) | data[0]) / 1000.0;
+		batteryInfo.cell1Voltage = ((data[3] << 8) | data[2]) / 1000.0;
+		batteryInfo.cell2Voltage = ((data[5] << 8) | data[4]) / 1000.0;
+		batteryInfo.cell3Voltage = ((data[7] << 8) | data[6]) / 1000.0;
+		batteryInfo.cell4Voltage = ((data[9] << 8) | data[8]) / 1000.0;
+		batteryInfo.cell5Voltage = ((data[11] << 8) | data[10]) / 1000.0;
+		
+		// Calculate voltage difference
+		float voltages[] = {batteryInfo.cell1Voltage, batteryInfo.cell2Voltage, 
+		                    batteryInfo.cell3Voltage, batteryInfo.cell4Voltage, 
+		                    batteryInfo.cell5Voltage};
+		float maxV = voltages[0], minV = voltages[0];
+		for (int i = 1; i < 5; i++) {
+			if (voltages[i] > maxV) maxV = voltages[i];
+			if (voltages[i] < minV) minV = voltages[i];
+		}
+		batteryInfo.cellVoltageDiff = maxV - minV;
+		
+		batteryInfo.tempSensor1 = ((data[15] << 8) | data[14]) / 100.0;
+		batteryInfo.tempSensor2 = ((data[17] << 8) | data[16]) / 100.0;
+		batteryInfo.dataValid = true;
+	}
+}
+
+// Enhanced display function to show parsed battery data
+void displayBatteryInfo() {
+	if (!batteryInfo.dataValid) {
+		return;
+	}
+	
+	int yPos = 62;
+	tft.fillRect(0, yPos, 240, 73, TFT_BLACK); // Clear data area
+	
+	// Display pack voltage (large)
+	tft.setTextColor(TFT_GREEN, TFT_BLACK);
+	tft.drawString("Pack: " + String(batteryInfo.packVoltage, 2) + "V", 10, yPos, 2);
+	yPos += 18;
+	
+	// Display cell voltages (compact)
 	tft.setTextColor(TFT_CYAN, TFT_BLACK);
-	tft.drawString(status, 80, 90, 2);
+	String cells = "C1:" + String(batteryInfo.cell1Voltage, 2) + " " +
+	               "C2:" + String(batteryInfo.cell2Voltage, 2) + " " +
+	               "C3:" + String(batteryInfo.cell3Voltage, 2);
+	tft.drawString(cells, 5, yPos, 1);
+	yPos += 10;
+	
+	cells = "C4:" + String(batteryInfo.cell4Voltage, 2) + " " +
+	        "C5:" + String(batteryInfo.cell5Voltage, 2) + " " +
+	        "Diff:" + String(batteryInfo.cellVoltageDiff, 3);
+	tft.drawString(cells, 5, yPos, 1);
+	yPos += 10;
+	
+	// Display temperatures
+	tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+	String temps = "Temp1: " + String(batteryInfo.tempSensor1, 1) + "C  " +
+	               "Temp2: " + String(batteryInfo.tempSensor2, 1) + "C";
+	tft.drawString(temps, 5, yPos, 1);
+	yPos += 12;
+	
+	// Display status if available
+	if (batteryInfo.statusCode != 0 || batteryInfo.state != "Unknown") {
+		tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+		String status = "State: " + batteryInfo.state + " [0x" + String(batteryInfo.statusCode, HEX) + "]";
+		tft.drawString(status, 5, yPos, 1);
+	}
 }
 
 void updateDisplayData(byte cmd, byte *data, int len) {
-	// Clear data area
+	// Clear command area
 	tft.fillRect(0, 115, 240, 20, TFT_BLACK);
 	
-	tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-	tft.drawString("Cmd: 0x" + String(cmd, HEX), 10, 115, 2);
+	tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
+	tft.drawString("Cmd: 0x" + String(cmd, HEX), 10, 115, 1);
 	
-	// Display battery data if available
-	if (len > 0 && cmd == 0x33) {
-		// Clear the data display area (from y=135 to bottom of screen)
-		tft.fillRect(0, 135, 240, 105, TFT_BLACK);
+	// Parse and display battery data for READ_DATA_REQUEST command
+	if (cmd == 0xCC && len >= 20) {
+		// Check if this looks like battery data (voltages should be reasonable)
+		uint16_t packV = ((data[1] << 8) | data[0]);
+		if (packV > 1000 && packV < 30000) {  // Between 1V and 30V
+			parseBatteryData(data, len);
+			displayBatteryInfo();
+			return;
+		}
+	}
+	
+	// For other commands or if parsing failed, show raw hex data
+	if (len > 0) {
+		// Clear the data display area
+		tft.fillRect(0, 120, 240, 15, TFT_BLACK);
 		
-		// Show some battery info (example)
+		// Show hex data
 		tft.setTextColor(TFT_WHITE, TFT_BLACK);
+		
+		// Build data string
 		String dataStr = "Data: ";
 		for (int i = 0; i < min(len, 8); i++) {
 			if (i > 0) dataStr += " ";
@@ -88,16 +204,7 @@ void updateDisplayData(byte cmd, byte *data, int len) {
 			dataStr += String(data[i], HEX);
 		}
 		
-		// Wrap text if needed
-		int yPos = 135;
-		int startIdx = 0;
-		while (startIdx < dataStr.length()) {
-			String line = dataStr.substring(startIdx, min((int)dataStr.length(), startIdx + 30));
-			tft.drawString(line, 10, yPos, 1);
-			yPos += 10;
-			startIdx += 30;
-			if (yPos > 230) break; // Prevent overflow (screen height is 240)
-		}
+		tft.drawString(dataStr, 10, 120, 1);
 	}
 	
 	lastUpdate = millis();

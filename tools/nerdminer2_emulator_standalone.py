@@ -49,47 +49,90 @@ class NerdMiner2Display:
         # Clear screen
         self.draw.rectangle([0, 0, self.width, self.height], fill=TFT_BLACK)
         
-        # Draw header (blue background)
-        self.draw.rectangle([0, 0, 240, 30], fill=TFT_BLUE)
-        self.draw.text((10, 8), "Open Battery Info", fill=TFT_WHITE, font=self.font_medium)
+        # Draw header (blue background) - reduced from 30 to 25
+        self.draw.rectangle([0, 0, 240, 25], fill=TFT_BLUE)
+        self.draw.text((10, 6), "Open Battery Info", fill=TFT_WHITE, font=self.font_medium)
         
-        # Draw version info
-        version_text = f"v{self.version_major}.{self.version_minor}.{self.version_patch}"
-        self.draw.text((10, 40), version_text, fill=TFT_GREEN, font=self.font_medium)
-        
-        # Draw edition text
-        self.draw.text((10, 60), "NerdMiner2 Edition", fill=TFT_WHITE, font=self.font_medium)
+        # Draw version info - compact gray text
+        TFT_DARKGREY = (64, 64, 64)
+        version_text = f"v{self.version_major}.{self.version_minor}.{self.version_patch} | NerdMiner2"
+        self.draw.text((10, 28), version_text, fill=TFT_DARKGREY, font=self.font_small)
         
         # Draw status label
-        self.draw.text((10, 90), "Status:", fill=TFT_WHITE, font=self.font_medium)
+        self.draw.text((10, 42), "Status:", fill=TFT_WHITE, font=self.font_medium)
         
         # Draw initial status
         self.update_display_status("Ready")
     
     def update_display_status(self, status):
         """Update the status display area (mimics updateDisplayStatus() in C++)"""
-        # Clear status area
-        self.draw.rectangle([80, 90, 240, 110], fill=TFT_BLACK)
+        # Clear status area - adjusted position
+        self.draw.rectangle([70, 42, 240, 58], fill=TFT_BLACK)
         
         # Draw new status
-        self.draw.text((80, 90), status, fill=TFT_CYAN, font=self.font_medium)
+        self.draw.text((70, 42), status, fill=TFT_CYAN, font=self.font_medium)
+    
+    def display_battery_info(self, pack_v, cells, temps):
+        """Display parsed battery information"""
+        y_pos = 62
+        self.draw.rectangle([0, y_pos, 240, 135], fill=TFT_BLACK)
+        
+        # Display pack voltage (large)
+        self.draw.text((10, y_pos), f"Pack: {pack_v:.2f}V", fill=TFT_GREEN, font=self.font_medium)
+        y_pos += 18
+        
+        # Display cell voltages (compact)
+        cell_str = f"C1:{cells[0]:.2f} C2:{cells[1]:.2f} C3:{cells[2]:.2f}"
+        self.draw.text((5, y_pos), cell_str, fill=TFT_CYAN, font=self.font_small)
+        y_pos += 10
+        
+        diff = max(cells) - min(cells)
+        cell_str = f"C4:{cells[3]:.2f} C5:{cells[4]:.2f} Diff:{diff:.3f}"
+        self.draw.text((5, y_pos), cell_str, fill=TFT_CYAN, font=self.font_small)
+        y_pos += 10
+        
+        # Display temperatures
+        temp_str = f"Temp1: {temps[0]:.1f}C  Temp2: {temps[1]:.1f}C"
+        self.draw.text((5, y_pos), temp_str, fill=TFT_YELLOW, font=self.font_small)
     
     def update_display_data(self, cmd, data):
         """Update the data display area (mimics updateDisplayData() in C++)"""
         # Clear command area
+        TFT_MAGENTA = (255, 0, 255)
         self.draw.rectangle([0, 115, 240, 135], fill=TFT_BLACK)
         
         # Draw command
         cmd_text = f"Cmd: 0x{cmd:02X}"
-        self.draw.text((10, 115), cmd_text, fill=TFT_YELLOW, font=self.font_small)
+        self.draw.text((10, 115), cmd_text, fill=TFT_MAGENTA, font=self.font_small)
         
-        # Display battery data if available for command 0x33
-        if data and cmd == 0x33:  # Empty lists are falsy in Python
+        # Parse and display battery data for READ_DATA_REQUEST (0xCC) command
+        if data and cmd == 0xCC and len(data) >= 20:
+            # Parse battery data (little-endian 16-bit values)
+            pack_v = ((data[1] << 8) | data[0]) / 1000.0
+            cells = [
+                ((data[3] << 8) | data[2]) / 1000.0,
+                ((data[5] << 8) | data[4]) / 1000.0,
+                ((data[7] << 8) | data[6]) / 1000.0,
+                ((data[9] << 8) | data[8]) / 1000.0,
+                ((data[11] << 8) | data[10]) / 1000.0,
+            ]
+            temps = [
+                ((data[15] << 8) | data[14]) / 100.0,
+                ((data[17] << 8) | data[16]) / 100.0,
+            ]
+            
+            # Check if data looks valid
+            if 1.0 < pack_v < 30.0:
+                self.display_battery_info(pack_v, cells, temps)
+                return
+        
+        # For other commands, show raw hex data
+        if data:
             # Show battery data (up to 8 bytes)
             data_str = 'Data: ' + ' '.join(f'{byte:02X}' for byte in data[:8])
             
-            # Draw data at Y=125 (10 pixels below command, fits within 135px height)
-            DATA_Y_POSITION = 125
+            # Draw data at Y=120
+            DATA_Y_POSITION = 120
             self.draw.text((10, DATA_Y_POSITION), data_str, fill=TFT_WHITE, font=self.font_small)
     
     def save(self, filename, scale=4):
@@ -120,18 +163,32 @@ def generate_preview_states():
     display.update_display_status("Processing...")
     display.save("nerdminer2_display_processing.png", scale=4)
     
-    # State 3: Battery data displayed
+    # State 3: Battery data displayed with parsed information
     print("Generating preview: Battery data state...")
     display = NerdMiner2Display()
     display.init_display()
-    sample_data = [0x12, 0x34, 0xAB, 0xCD, 0xEF, 0x56, 0x78, 0x9A]
-    display.update_display_data(0x33, sample_data)
-    display.save("nerdminer2_display_data.png", scale=4)
+    # Simulate READ_DATA_REQUEST response with realistic battery data
+    # Pack voltage: 18.5V (18500 mV = 0x484C little-endian)
+    # Cell voltages: 3.7V each (3700 mV = 0x0E74 little-endian)
+    # Temperatures: 25.5°C (2550 = 0x09F6 little-endian)
+    battery_data = [
+        0x4C, 0x48,  # Pack voltage: 18.5V
+        0x74, 0x0E,  # Cell 1: 3.7V
+        0x70, 0x0E,  # Cell 2: 3.68V
+        0x78, 0x0E,  # Cell 3: 3.704V
+        0x6C, 0x0E,  # Cell 4: 3.692V
+        0x74, 0x0E,  # Cell 5: 3.7V
+        0x00, 0x00,  # Reserved
+        0xF6, 0x09,  # Temp 1: 25.5°C
+        0xEA, 0x09,  # Temp 2: 25.38°C
+    ]
+    display.update_display_data(0xCC, battery_data)
+    display.save("nerdminer2_display_batterydata.png", scale=4)
     
     print("\nAll preview images generated successfully!")
     print("- nerdminer2_display_ready.png (Ready state)")
     print("- nerdminer2_display_processing.png (Processing state)")
-    print("- nerdminer2_display_data.png (Battery data displayed)")
+    print("- nerdminer2_display_batterydata.png (Parsed battery data)")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--preview":
